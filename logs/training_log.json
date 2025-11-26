@@ -1,0 +1,107 @@
+[
+  {
+    "global_step": 10,
+    "stage": "STAGE_1",
+    "step": 10,
+    "loss": 5.803431540981135,
+    "batch_size": 2
+  },
+  {
+    "global_step": 20,
+    "stage": "STAGE_1",
+    "step": 20,
+    "loss": 4.786831783708611,
+    "batch_size": 2
+  },
+  {
+    "global_step": 30,
+    "stage": "STAGE_1",
+    "step": 30,
+    "loss": 3.6283769384564715,
+    "batch_size": 2
+  },
+  {
+    "global_step": 40,
+    "stage": "STAGE_1",
+    "step": 40,
+    "loss": 5.060563644422926,
+    "batch_size": 2
+  },
+  {
+    "global_step": 50,
+    "stage": "STAGE_1",
+    "step": 50,
+    "loss": 6.124300668955042,
+    "batch_size": 2
+  },
+  {
+    "global_step": 60,
+    "stage": "STAGE_3",
+    "step": 10,
+    "loss": 4.991416349745219,
+    "batch_size": 2
+  },
+  {
+    "global_step": 70,
+    "stage": "STAGE_3",
+    "step": 20,
+    "loss": 5.127233068386187,
+    "batch_size": 2
+  },
+  {
+    "global_step": 80,
+    "stage": "STAGE_3",
+    "step": 30,
+    "loss": 5.024620367536116,
+    "batch_size": 2
+  },
+  {
+    "global_step": 90,
+    "stage": "STAGE_3",
+    "step": 40,
+    "loss": 7.007710858911979,
+    "batch_size": 2
+  },
+  {
+    "global_step": 100,
+    "stage": "STAGE_3",
+    "step": 50,
+    "loss": 5.974376632707626,
+    "batch_size": 2
+  },
+  {
+    "global_step": 110,
+    "stage": "STAGE_5",
+    "step": 10,
+    "loss": 4.697013818836128,
+    "batch_size": 2
+  },
+  {
+    "global_step": 120,
+    "stage": "STAGE_5",
+    "step": 20,
+    "loss": 6.802851588549373,
+    "batch_size": 2
+  },
+  {
+    "global_step": 130,
+    "stage": "STAGE_5",
+    "step": 30,
+    "loss": 4.61271072161737,
+    "batch_size": 2
+  },
+  {
+    "global_step": 140,
+    "stage": "STAGE_5",
+    "step": 40,
+    "loss": 3.718911224070598,
+    "batch_size": 2
+  },
+  {
+    "global_step": 150,
+    "stage": "STAGE_5",
+    "step": 50,
+    "loss": 5.335512705975548,
+    "batch_size": 2
+  }
+]

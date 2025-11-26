@@ -1,0 +1,92 @@
+[
+  {
+    "global_step": 10,
+    "stage": "stage1",
+    "step": 10,
+    "loss": 0.0
+  },
+  {
+    "global_step": 20,
+    "stage": "stage1",
+    "step": 20,
+    "loss": 0.0
+  },
+  {
+    "global_step": 30,
+    "stage": "stage1",
+    "step": 30,
+    "loss": 0.0
+  },
+  {
+    "global_step": 40,
+    "stage": "stage1",
+    "step": 40,
+    "loss": 0.0
+  },
+  {
+    "global_step": 50,
+    "stage": "stage1",
+    "step": 50,
+    "loss": 0.0
+  },
+  {
+    "global_step": 60,
+    "stage": "stage3",
+    "step": 10,
+    "loss": 0.0
+  },
+  {
+    "global_step": 70,
+    "stage": "stage3",
+    "step": 20,
+    "loss": 0.0
+  },
+  {
+    "global_step": 80,
+    "stage": "stage3",
+    "step": 30,
+    "loss": 0.0
+  },
+  {
+    "global_step": 90,
+    "stage": "stage3",
+    "step": 40,
+    "loss": 0.0
+  },
+  {
+    "global_step": 100,
+    "stage": "stage3",
+    "step": 50,
+    "loss": 0.0
+  },
+  {
+    "global_step": 110,
+    "stage": "stage5",
+    "step": 10,
+    "loss": 0.0
+  },
+  {
+    "global_step": 120,
+    "stage": "stage5",
+    "step": 20,
+    "loss": 0.0
+  },
+  {
+    "global_step": 130,
+    "stage": "stage5",
+    "step": 30,
+    "loss": 0.0
+  },
+  {
+    "global_step": 140,
+    "stage": "stage5",
+    "step": 40,
+    "loss": 0.0
+  },
+  {
+    "global_step": 150,
+    "stage": "stage5",
+    "step": 50,
+    "loss": 0.0
+  }
+]

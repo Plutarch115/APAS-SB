@@ -1,0 +1,15 @@
+# Core dependencies
+torch>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+einops>=0.7.0
+
+# Data loading and processing
+biopython>=1.81  # PDB parsing
+rdkit>=2023.3.1  # Ligand handling and cheminformatics
+
+# Optional dependencies for advanced features
+# openbabel>=3.1.1  # Format conversion (optional)
+# hhsuite>=3.3.0  # MSA generation (optional)
+# autodock-vina>=1.2.0  # Advanced docking (optional)
+

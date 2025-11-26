@@ -1,0 +1,13 @@
+{
+  "os":  "macOS-26.0-arm64-arm-64bit",
+  "python":  "CPython 3.12.11",
+  "startedAt":  "2025-11-01T03:00:37.806401Z",
+  "program":  "/Users/ramanathana/Documents/augment-projects/APAS-SB/scripts/train_with_uncertainty_full.py",
+  "codePath":  "scripts/train_with_uncertainty_full.py",
+  "codePathLocal":  "scripts/train_with_uncertainty_full.py",
+  "email":  "arvindster@gmail.com",
+  "root":  "/Users/ramanathana/Documents/augment-projects/APAS-SB",
+  "host":  "Arvinds-MacBook-Pro.local",
+  "executable":  "/Users/ramanathana/miniconda3/bin/python",
+  "writerId":  "vtb9i2uxdo7i9diy6mc0y1wk325s591k"
+}
