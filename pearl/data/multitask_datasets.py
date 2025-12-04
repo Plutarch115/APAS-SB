@@ -511,6 +511,443 @@ class BindingDBDataset(Dataset):
         }
 
 
+class PubChemHTSDataset(Dataset):
+    """
+    PubChem High-Throughput Screening: Binary classification for hit discovery.
+
+    Boltz-2 usage:
+    - 200K binders + 1.8M decoys
+    - Binary classification (hit/non-hit)
+    - Sampling weight: 0.25
+    - Focus: High-throughput screening campaigns
+    """
+
+    def __init__(
+        self,
+        data_dir: str,
+        split: str = 'train',
+        transform=None,
+        use_synthetic: bool = True
+    ):
+        self.data_dir = Path(data_dir)
+        self.split = split
+        self.transform = transform
+        self.use_synthetic = use_synthetic
+
+        if use_synthetic:
+            self.data = self._generate_synthetic_data()
+        else:
+            self.data = self._load_real_data()
+
+    def _generate_synthetic_data(self, num_samples: int = 5000):
+        """Generate synthetic PubChem HTS-like data for testing"""
+        np.random.seed(45)
+        data = []
+
+        # 10% binders, 90% decoys (realistic HTS ratio)
+        num_binders = int(num_samples * 0.1)
+        num_decoys = num_samples - num_binders
+
+        for i in range(num_binders):
+            data.append({
+                'protein_features': np.random.randn(100, 64).astype(np.float32),
+                'ligand_features': np.random.randn(25, 64).astype(np.float32),
+                'is_binder': 1.0,
+                'assay_id': f'AID_{np.random.randint(1000, 9999)}',
+                'weight': 5.0,  # Lower weight for HTS data
+                'data_source': 'pubchem_hts',
+                'task': 'binary_classification'
+            })
+
+        for i in range(num_decoys):
+            data.append({
+                'protein_features': np.random.randn(100, 64).astype(np.float32),
+                'ligand_features': np.random.randn(25, 64).astype(np.float32),
+                'is_binder': 0.0,
+                'assay_id': f'AID_{np.random.randint(1000, 9999)}',
+                'weight': 5.0,
+                'data_source': 'pubchem_hts',
+                'task': 'binary_classification'
+            })
+
+        return data
+
+    def _load_real_data(self):
+        """Load real PubChem HTS data"""
+        # TODO: Implement PubChem HTS data loading
+        # - Download from PubChem BioAssay database
+        # - Filter for protein targets
+        # - Extract active/inactive compounds
+        raise NotImplementedError("Real PubChem HTS data loading not yet implemented")
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        item = self.data[idx]
+
+        if self.transform:
+            item = self.transform(item)
+
+        return {
+            'protein_features': torch.from_numpy(item['protein_features']),
+            'ligand_features': torch.from_numpy(item['ligand_features']),
+            'target': torch.tensor(item['is_binder'], dtype=torch.float32),
+            'assay_id': item['assay_id'],
+            'weight': torch.tensor(item['weight'], dtype=torch.float32),
+            'task': item['task'],
+            'data_source': item['data_source']
+        }
+
+
+class PubChemSmallAssaysDataset(Dataset):
+    """
+    PubChem Small Assays: Higher-quality screening data.
+
+    Boltz-2 usage:
+    - 10K binders + 50K decoys
+    - Both binary and continuous affinity values
+    - Sampling weight: 0.10
+    - Focus: Smaller, higher-quality assays
+    """
+
+    def __init__(
+        self,
+        data_dir: str,
+        split: str = 'train',
+        transform=None,
+        use_synthetic: bool = True
+    ):
+        self.data_dir = Path(data_dir)
+        self.split = split
+        self.transform = transform
+        self.use_synthetic = use_synthetic
+
+        if use_synthetic:
+            self.data = self._generate_synthetic_data()
+        else:
+            self.data = self._load_real_data()
+
+    def _generate_synthetic_data(self, num_samples: int = 2000):
+        """Generate synthetic PubChem Small Assays data for testing"""
+        np.random.seed(46)
+        data = []
+
+        # 17% binders, 83% decoys (better ratio than HTS)
+        num_binders = int(num_samples * 0.17)
+        num_decoys = num_samples - num_binders
+
+        for i in range(num_binders):
+            # Some have continuous values, some binary
+            has_affinity = np.random.rand() > 0.5
+
+            item = {
+                'protein_features': np.random.randn(100, 64).astype(np.float32),
+                'ligand_features': np.random.randn(25, 64).astype(np.float32),
+                'is_binder': 1.0,
+                'assay_id': f'AID_{np.random.randint(100, 999)}',
+                'weight': 7.0,  # Higher quality than HTS
+                'data_source': 'pubchem_small',
+                'task': 'binding_affinity' if has_affinity else 'binary_classification'
+            }
+
+            if has_affinity:
+                item['affinity_value'] = np.random.uniform(-2, 2)
+                item['affinity_type'] = np.random.choice(['IC50', 'EC50', 'Ki'])
+
+            data.append(item)
+
+        for i in range(num_decoys):
+            data.append({
+                'protein_features': np.random.randn(100, 64).astype(np.float32),
+                'ligand_features': np.random.randn(25, 64).astype(np.float32),
+                'is_binder': 0.0,
+                'assay_id': f'AID_{np.random.randint(100, 999)}',
+                'weight': 7.0,
+                'data_source': 'pubchem_small',
+                'task': 'binary_classification'
+            })
+
+        return data
+
+    def _load_real_data(self):
+        """Load real PubChem Small Assays data"""
+        # TODO: Implement PubChem Small Assays data loading
+        raise NotImplementedError("Real PubChem Small Assays data loading not yet implemented")
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        item = self.data[idx]
+
+        if self.transform:
+            item = self.transform(item)
+
+        result = {
+            'protein_features': torch.from_numpy(item['protein_features']),
+            'ligand_features': torch.from_numpy(item['ligand_features']),
+            'target': torch.tensor(item.get('affinity_value', item['is_binder']), dtype=torch.float32),
+            'assay_id': item['assay_id'],
+            'weight': torch.tensor(item['weight'], dtype=torch.float32),
+            'task': item['task'],
+            'data_source': item['data_source']
+        }
+
+        if 'affinity_type' in item:
+            result['affinity_type'] = item['affinity_type']
+
+        return result
+
+
+class CeMMFragmentsDataset(Dataset):
+    """
+    CeMM Fragments: Fragment screening data.
+
+    Boltz-2 usage:
+    - 25K binders + 115K decoys
+    - Binary classification
+    - Sampling weight: 0.10
+    - Focus: Fragment-based drug discovery
+    """
+
+    def __init__(
+        self,
+        data_dir: str,
+        split: str = 'train',
+        transform=None,
+        use_synthetic: bool = True
+    ):
+        self.data_dir = Path(data_dir)
+        self.split = split
+        self.transform = transform
+        self.use_synthetic = use_synthetic
+
+        if use_synthetic:
+            self.data = self._generate_synthetic_data()
+        else:
+            self.data = self._load_real_data()
+
+    def _generate_synthetic_data(self, num_samples: int = 3000):
+        """Generate synthetic CeMM fragment data for testing"""
+        np.random.seed(47)
+        data = []
+
+        # 18% binders, 82% decoys (fragment screening ratio)
+        num_binders = int(num_samples * 0.18)
+        num_decoys = num_samples - num_binders
+
+        for i in range(num_binders):
+            data.append({
+                'protein_features': np.random.randn(100, 64).astype(np.float32),
+                'ligand_features': np.random.randn(15, 64).astype(np.float32),  # Smaller fragments
+                'is_binder': 1.0,
+                'fragment_id': f'FRAG_{i:05d}',
+                'weight': 7.0,
+                'data_source': 'cemm_fragments',
+                'task': 'binary_classification'
+            })
+
+        for i in range(num_decoys):
+            data.append({
+                'protein_features': np.random.randn(100, 64).astype(np.float32),
+                'ligand_features': np.random.randn(15, 64).astype(np.float32),
+                'is_binder': 0.0,
+                'fragment_id': f'FRAG_{i+num_binders:05d}',
+                'weight': 7.0,
+                'data_source': 'cemm_fragments',
+                'task': 'binary_classification'
+            })
+
+        return data
+
+    def _load_real_data(self):
+        """Load real CeMM fragment data"""
+        # TODO: Implement CeMM fragment data loading
+        raise NotImplementedError("Real CeMM fragment data loading not yet implemented")
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        item = self.data[idx]
+
+        if self.transform:
+            item = self.transform(item)
+
+        return {
+            'protein_features': torch.from_numpy(item['protein_features']),
+            'ligand_features': torch.from_numpy(item['ligand_features']),
+            'target': torch.tensor(item['is_binder'], dtype=torch.float32),
+            'fragment_id': item['fragment_id'],
+            'weight': torch.tensor(item['weight'], dtype=torch.float32),
+            'task': item['task'],
+            'data_source': item['data_source']
+        }
+
+
+class MIDASDataset(Dataset):
+    """
+    MIDAS: Protein-metabolite interactions.
+
+    Boltz-2 usage:
+    - 2K binders + 20K decoys
+    - Binary classification
+    - Sampling weight: 0.05
+    - Focus: Metabolite binding
+    """
+
+    def __init__(
+        self,
+        data_dir: str,
+        split: str = 'train',
+        transform=None,
+        use_synthetic: bool = True
+    ):
+        self.data_dir = Path(data_dir)
+        self.split = split
+        self.transform = transform
+        self.use_synthetic = use_synthetic
+
+        if use_synthetic:
+            self.data = self._generate_synthetic_data()
+        else:
+            self.data = self._load_real_data()
+
+    def _generate_synthetic_data(self, num_samples: int = 1000):
+        """Generate synthetic MIDAS data for testing"""
+        np.random.seed(48)
+        data = []
+
+        # 9% binders, 91% decoys (metabolite screening ratio)
+        num_binders = int(num_samples * 0.09)
+        num_decoys = num_samples - num_binders
+
+        for i in range(num_binders):
+            data.append({
+                'protein_features': np.random.randn(100, 64).astype(np.float32),
+                'ligand_features': np.random.randn(20, 64).astype(np.float32),  # Metabolites
+                'is_binder': 1.0,
+                'metabolite_id': f'MET_{i:04d}',
+                'weight': 8.0,  # Higher quality metabolite data
+                'data_source': 'midas',
+                'task': 'binary_classification'
+            })
+
+        for i in range(num_decoys):
+            data.append({
+                'protein_features': np.random.randn(100, 64).astype(np.float32),
+                'ligand_features': np.random.randn(20, 64).astype(np.float32),
+                'is_binder': 0.0,
+                'metabolite_id': f'MET_{i+num_binders:04d}',
+                'weight': 8.0,
+                'data_source': 'midas',
+                'task': 'binary_classification'
+            })
+
+        return data
+
+    def _load_real_data(self):
+        """Load real MIDAS data"""
+        # TODO: Implement MIDAS data loading
+        raise NotImplementedError("Real MIDAS data loading not yet implemented")
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        item = self.data[idx]
+
+        if self.transform:
+            item = self.transform(item)
+
+        return {
+            'protein_features': torch.from_numpy(item['protein_features']),
+            'ligand_features': torch.from_numpy(item['ligand_features']),
+            'target': torch.tensor(item['is_binder'], dtype=torch.float32),
+            'metabolite_id': item['metabolite_id'],
+            'weight': torch.tensor(item['weight'], dtype=torch.float32),
+            'task': item['task'],
+            'data_source': item['data_source']
+        }
+
+
+class SyntheticDecoysDataset(Dataset):
+    """
+    Synthetic Decoys: Generated negative examples for data augmentation.
+
+    Boltz-2 usage:
+    - 1.2M synthetic decoys
+    - Binary classification (all negatives)
+    - Sampling weight: 0.25
+    - Focus: Data augmentation, hard negatives
+    """
+
+    def __init__(
+        self,
+        data_dir: str,
+        split: str = 'train',
+        transform=None,
+        use_synthetic: bool = True,
+        num_decoys: int = 10000  # Configurable for testing
+    ):
+        self.data_dir = Path(data_dir)
+        self.split = split
+        self.transform = transform
+        self.use_synthetic = use_synthetic
+        self.num_decoys = num_decoys
+
+        if use_synthetic:
+            self.data = self._generate_synthetic_data()
+        else:
+            self.data = self._load_real_data()
+
+    def _generate_synthetic_data(self):
+        """Generate synthetic decoys for testing"""
+        np.random.seed(49)
+        data = []
+
+        for i in range(self.num_decoys):
+            data.append({
+                'protein_features': np.random.randn(100, 64).astype(np.float32),
+                'ligand_features': np.random.randn(25, 64).astype(np.float32),
+                'is_binder': 0.0,  # All decoys
+                'decoy_id': f'DECOY_{i:06d}',
+                'weight': 3.0,  # Lower weight for synthetic data
+                'data_source': 'synthetic_decoys',
+                'task': 'binary_classification'
+            })
+
+        return data
+
+    def _load_real_data(self):
+        """Load real synthetic decoys"""
+        # TODO: Implement synthetic decoy generation/loading
+        # - Generate using SMILES randomization
+        # - Generate using docking-based methods
+        # - Generate using GAN-based approaches
+        raise NotImplementedError("Real synthetic decoy generation not yet implemented")
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        item = self.data[idx]
+
+        if self.transform:
+            item = self.transform(item)
+
+        return {
+            'protein_features': torch.from_numpy(item['protein_features']),
+            'ligand_features': torch.from_numpy(item['ligand_features']),
+            'target': torch.tensor(item['is_binder'], dtype=torch.float32),
+            'decoy_id': item['decoy_id'],
+            'weight': torch.tensor(item['weight'], dtype=torch.float32),
+            'task': item['task'],
+            'data_source': item['data_source']
+        }
+
+
 def create_multitask_dataset(
     data_dirs: Dict[str, str],
     split: str = 'train',
@@ -526,7 +963,7 @@ def create_multitask_dataset(
                    Supported keys:
                    - Original: 'pdbind', 'skempi2', 'brenda', 'proteingym'
                    - Boltz-2: 'chembl', 'bindingdb', 'pubchem_hts',
-                              'pubchem_small', 'cemm', 'midas'
+                              'pubchem_small', 'cemm', 'midas', 'synthetic_decoys'
         split: 'train', 'val', or 'test'
         use_synthetic: Whether to use synthetic data for testing
 
@@ -555,12 +992,20 @@ def create_multitask_dataset(
     if 'bindingdb' in data_dirs:
         datasets.append(BindingDBDataset(data_dirs['bindingdb'], split, use_synthetic=use_synthetic))
 
-    # TODO: Add remaining Boltz-2 datasets
-    # - PubChemHTSDataset
-    # - PubChemSmallAssaysDataset
-    # - CeMMFragmentsDataset
-    # - MIDASDataset
-    # - SyntheticDecoysDataset
+    if 'pubchem_hts' in data_dirs:
+        datasets.append(PubChemHTSDataset(data_dirs['pubchem_hts'], split, use_synthetic=use_synthetic))
+
+    if 'pubchem_small' in data_dirs:
+        datasets.append(PubChemSmallAssaysDataset(data_dirs['pubchem_small'], split, use_synthetic=use_synthetic))
+
+    if 'cemm' in data_dirs:
+        datasets.append(CeMMFragmentsDataset(data_dirs['cemm'], split, use_synthetic=use_synthetic))
+
+    if 'midas' in data_dirs:
+        datasets.append(MIDASDataset(data_dirs['midas'], split, use_synthetic=use_synthetic))
+
+    if 'synthetic_decoys' in data_dirs:
+        datasets.append(SyntheticDecoysDataset(data_dirs['synthetic_decoys'], split, use_synthetic=use_synthetic))
 
     return ConcatDataset(datasets)
 
