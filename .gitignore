@@ -68,7 +68,8 @@ Thumbs.db
 
 # Project specific
 results/
-data/
+/data/
+results/data/
 checkpoints/
 *.pt
 *.pth
