@@ -71,13 +71,24 @@ results/
 /data/
 results/data/
 checkpoints/
+logs/
+wandb/
+uncertainty_training_output/
 *.pt
 *.pth
 *.ckpt
 *.log
+*.json
 
 # Large files
 *.pdf
 *.tar.gz
 *.zip
+*.h5
+*.hdf5
+
+# Temporary files
+*.tmp
+*.bak
+*~
 

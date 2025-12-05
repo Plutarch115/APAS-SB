@@ -1,0 +1,178 @@
+# Oracle Cloud Infrastructure Configuration for APAS-SB Training
+# Aligned with APAS-SB_Development_Roadmap.md
+# 64 H100 GPUs, 85-day training campaign
+
+# Infrastructure
+infrastructure:
+  provider: "oracle_cloud"
+  region: "us-ashburn-1"  # Or your preferred region
+  instance_type: "BM.GPU.H100.8"  # 8x H100 per node
+  num_nodes: 8  # Total: 64 H100 GPUs
+  gpus_per_node: 8
+  total_gpus: 64
+  
+  # Networking
+  network:
+    backend: "nccl"
+    interface: "ib0"  # InfiniBand for high-speed interconnect
+    nccl_socket_ifname: "ib0"
+    nccl_ib_disable: 0
+  
+  # Storage
+  storage:
+    data_dir: "/mnt/data"  # Block storage for datasets
+    checkpoint_dir: "/mnt/checkpoints"  # Object storage for checkpoints
+    log_dir: "/mnt/logs"
+    cache_dir: "/mnt/cache"
+
+# Training Configuration
+training:
+  # Phase 2A: Baseline Training (Days 13-25, 48 GPUs)
+  phase_2a:
+    name: "baseline_training"
+    gpus: 48
+    duration_days: 13
+    batch_size_per_gpu: 4
+    gradient_accumulation_steps: 4
+    effective_batch_size: 768  # 48 * 4 * 4
+    learning_rate: 1.0e-4
+    warmup_steps: 1000
+    max_steps: 100000
+    
+    datasets:
+      - pdbind
+      - skempi2
+      - chembl
+      - bindingdb
+    
+    loss_weights:
+      binding_affinity: 1.0
+      ddg: 1.0
+  
+  # Phase 2B: Multi-task Training (Days 26-42, 56 GPUs)
+  phase_2b:
+    name: "multitask_training"
+    gpus: 56
+    duration_days: 17
+    batch_size_per_gpu: 4
+    gradient_accumulation_steps: 4
+    effective_batch_size: 896  # 56 * 4 * 4
+    learning_rate: 5.0e-5
+    warmup_steps: 500
+    max_steps: 150000
+    
+    datasets:
+      - pdbind
+      - skempi2
+      - brenda
+      - proteingym
+      - chembl
+      - bindingdb
+      - pubchem_hts
+      - pubchem_small
+      - cemm
+      - midas
+      - synthetic_decoys
+    
+    loss_weights:
+      binding_affinity: 1.0
+      ddg: 1.0
+      kcat: 0.5
+      fitness: 0.5
+      binary_classification: 0.8
+  
+  # Phase 2C: Uncertainty-Aware Training (Days 43-62, 64 GPUs)
+  phase_2c:
+    name: "uncertainty_aware_training"
+    gpus: 64
+    duration_days: 20
+    batch_size_per_gpu: 4
+    gradient_accumulation_steps: 4
+    effective_batch_size: 1024  # 64 * 4 * 4
+    learning_rate: 2.0e-5
+    warmup_steps: 500
+    max_steps: 200000
+    
+    datasets:
+      - pdbind
+      - skempi2
+      - brenda
+      - proteingym
+      - chembl
+      - bindingdb
+      - pubchem_hts
+      - pubchem_small
+      - cemm
+      - midas
+      - synthetic_decoys
+      - mdcath  # MD trajectories
+      - atlas   # MD trajectories
+    
+    loss_weights:
+      binding_affinity: 1.0
+      ddg: 1.0
+      kcat: 0.5
+      fitness: 0.5
+      binary_classification: 0.8
+      density_aware: 1.5  # Higher weight for MD-derived density
+    
+    md_config:
+      mdcath_temperature: 320  # Start with 320K
+      mdcath_max_frames: 100
+      mdcath_stride: 10
+      atlas_max_frames: 100
+      atlas_stride: 10
+      compute_density: true
+
+# Model Configuration
+model:
+  architecture: "pearl"
+  hidden_dim: 512
+  num_layers: 24
+  num_heads: 16
+  dropout: 0.1
+  
+  # Multi-task heads
+  heads:
+    binding_affinity: true
+    ddg: true
+    kcat: true
+    fitness: true
+    binary_classification: true
+    density_prediction: true
+
+# Optimization
+optimization:
+  optimizer: "adamw"
+  betas: [0.9, 0.999]
+  weight_decay: 0.01
+  grad_clip: 1.0
+  
+  # Mixed precision
+  mixed_precision: true
+  fp16: false
+  bf16: true  # H100 supports BF16
+  
+  # Gradient checkpointing
+  gradient_checkpointing: true
+
+# Monitoring
+monitoring:
+  wandb:
+    enabled: true
+    project: "apas-sb"
+    entity: "acadev"
+  
+  mlflow:
+    enabled: true
+    tracking_uri: "http://localhost:5000"
+  
+  log_interval: 100
+  eval_interval: 1000
+  save_interval: 5000
+
+# Checkpointing
+checkpointing:
+  save_total_limit: 5
+  save_on_each_node: false
+  resume_from_checkpoint: null
