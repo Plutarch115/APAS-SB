@@ -279,7 +279,7 @@ class CombinedBoltz2Loss(nn.Module):
             device=predictions.device
         )
 
-        total_loss = 0.0
+        total_loss = torch.tensor(0.0, device=predictions.device, requires_grad=True)
         loss_dict = {}
 
         # Continuous affinity tasks: Huber + Ranking
@@ -309,7 +309,7 @@ class CombinedBoltz2Loss(nn.Module):
             total_loss = total_loss + focal
             loss_dict['focal'] = focal.item()
 
-        loss_dict['total'] = total_loss.item()
+        loss_dict['total'] = total_loss.item() if total_loss.numel() == 1 else total_loss.mean().item()
 
         return total_loss, loss_dict
 

@@ -7,6 +7,11 @@ einops>=0.7.0
 # Data loading and processing
 biopython>=1.81  # PDB parsing
 rdkit>=2023.3.1  # Ligand handling and cheminformatics
+h5py>=3.8.0  # HDF5 file handling for MD trajectories
+pyyaml>=6.0  # YAML configuration files
+
+# Experiment tracking and monitoring
+wandb>=0.16.0  # Weights & Biases for experiment tracking
 
 # Optional dependencies for advanced features
 # openbabel>=3.1.1  # Format conversion (optional)

@@ -1,0 +1,138 @@
+# Weights & Biases Configuration for APAS-SB Training
+
+# W&B Settings
+wandb:
+  project: "apas-sb"  # Your W&B project name
+  entity: null  # Your W&B username or team (set to your username)
+  tags:
+    - "pearl"
+    - "binding-affinity"
+    - "multi-task"
+
+# Data Configuration
+data_root: "./data"
+use_synthetic: true  # Set to false when real data is available
+
+# Model Configuration
+model:
+  hidden_dim: 512
+  num_layers: 12
+  num_heads: 8
+  dropout: 0.1
+  pair_dim: 128
+
+# Training Phases (aligned with APAS-SB_Development_Roadmap.md)
+training:
+  # Phase 2A: Baseline Training (48 GPUs, 13 days)
+  phase_2a:
+    name: "baseline_training"
+    gpus: 48
+    duration_days: 13
+    batch_size_per_gpu: 4
+    gradient_accumulation_steps: 4
+    effective_batch_size: 768
+    num_epochs: 100
+    learning_rate: 1.0e-4
+    weight_decay: 0.01
+    warmup_steps: 1000
+    
+    datasets:
+      - pdbind
+      - skempi2
+      - brenda
+      - proteingym
+      - chembl
+      - bindingdb
+    
+    loss_weights:
+      binding_affinity: 1.0
+      ddg: 1.0
+      kcat: 0.5
+      fitness: 0.5
+  
+  # Phase 2B: Multi-task Training (56 GPUs, 17 days)
+  phase_2b:
+    name: "multitask_training"
+    gpus: 56
+    duration_days: 17
+    batch_size_per_gpu: 4
+    gradient_accumulation_steps: 4
+    effective_batch_size: 896
+    num_epochs: 120
+    learning_rate: 8.0e-5
+    weight_decay: 0.01
+    warmup_steps: 1500
+    
+    datasets:
+      - pdbind
+      - skempi2
+      - brenda
+      - proteingym
+      - chembl
+      - bindingdb
+      - pubchem_hts
+      - pubchem_small
+      - cemm
+      - midas
+      - synthetic_decoys
+    
+    loss_weights:
+      binding_affinity: 1.0
+      ddg: 1.0
+      kcat: 0.8
+      fitness: 0.8
+  
+  # Phase 2C: Uncertainty-Aware Training (64 GPUs, 20 days)
+  phase_2c:
+    name: "uncertainty_aware_training"
+    gpus: 64
+    duration_days: 20
+    batch_size_per_gpu: 4
+    gradient_accumulation_steps: 4
+    effective_batch_size: 1024
+    num_epochs: 150
+    learning_rate: 5.0e-5
+    weight_decay: 0.01
+    warmup_steps: 2000
+    
+    datasets:
+      - pdbind
+      - skempi2
+      - brenda
+      - proteingym
+      - chembl
+      - bindingdb
+      - pubchem_hts
+      - pubchem_small
+      - cemm
+      - midas
+      - synthetic_decoys
+      - mdcath
+      - atlas
+    
+    loss_weights:
+      binding_affinity: 1.0
+      ddg: 1.0
+      kcat: 1.0
+      fitness: 1.0
+      md_consistency: 0.5
+
+# Optimization
+max_grad_norm: 1.0
+scheduler: "cosine"
+min_learning_rate: 1.0e-6
+
+# Logging
+log_interval: 10  # Log every N batches
+checkpoint_interval: 10  # Save checkpoint every N epochs
+checkpoint_dir: "./checkpoints"
+
+# System
+num_workers: 4
+pin_memory: true
+mixed_precision: true  # Use BF16 on H100 GPUs
+
+# Validation
+val_interval: 5  # Validate every N epochs
+val_batch_size: 8
+
