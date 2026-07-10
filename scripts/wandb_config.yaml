@@ -11,7 +11,28 @@ wandb:
 
 # Data Configuration
 data_root: "./data"
-use_synthetic: true  # Set to false when real data is available
+use_synthetic: false  # Use real datasets by default (--test forces synthetic)
+
+# Real BindingDB dataset (eliminates synthetic binding-affinity data)
+bindingdb:
+  # Raw 8.8 GB dump (streamed once into the processed cache below).
+  tsv_path: "/nfs/lambda_stor_01/data/avasan/APAS-SB/APAS-SB/data/bindingdb/BindingDB_All.tsv"
+  # Compact preprocessed cache; built automatically if missing.
+  processed_csv: "./data/bindingdb/bindingdb_processed.csv"
+  # Cap kept rows (null = keep all). Useful to bound memory / iteration time.
+  max_samples: 200000
+
+# Featurization: real pretrained encoders for protein/ligand inputs.
+#   mode: esm2_molformer -> ESM2 (protein) + MolFormer (ligand) per-token embeddings
+#         hash           -> deterministic 64-d placeholder features (test/synthetic)
+features:
+  mode: esm2_molformer
+  esm2_model: esm2_t33_650M_UR50D      # 1280-d; alt: esm2_t30_150M_UR50D (640-d), esm2_t6_8M_UR50D (320-d)
+  molformer_model: ibm/MoLFormer-XL-both-10pct   # 768-d
+  max_protein_len: 200                 # residues kept per protein (pad/truncate)
+  max_ligand_len: 64                   # SMILES tokens kept per ligand
+  emb_cache_dir: "./data/bindingdb/emb_cache"
+  precompute: true                     # warm the embedding cache before training
 
 # Model Configuration
 model:

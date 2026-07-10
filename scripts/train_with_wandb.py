@@ -144,13 +144,84 @@ def log_model_architecture(model: nn.Module, run):
     wandb.run.summary['model_architecture'] = str(model)
 
 
+# Datasets that currently have a real (non-synthetic) data loader implemented.
+REAL_CAPABLE_DATASETS = {'bindingdb'}
+
+
+def resolve_phase_key(config: Dict, phase: str) -> str:
+    """Normalize a phase identifier (e.g. '2a') to its config key ('phase_2a')."""
+    training = config['training']
+    if phase in training:
+        return phase
+    if f'phase_{phase}' in training:
+        return f'phase_{phase}'
+    raise KeyError(
+        f"Phase '{phase}' not found in config['training'] "
+        f"(available: {sorted(training.keys())})"
+    )
+
+
+def get_feature_config(config: Dict, use_synthetic: bool) -> Dict:
+    """
+    Resolve the featurization settings and the resulting protein/ligand feature
+    dimensions. Real ESM2 + MolFormer embeddings are used on real data; the
+    fast deterministic 'hash' features (dim 64) are used in synthetic/test mode.
+    """
+    from pearl.data.featurizers import ESM2_DIMS, MOLFORMER_DIMS
+
+    feat = dict(config.get('features', {}))
+    default_mode = 'hash' if use_synthetic else 'esm2_molformer'
+    mode = feat.get('mode', default_mode)
+    # Synthetic/test data has no real sequences/SMILES to encode -> force hash.
+    if use_synthetic:
+        mode = 'hash'
+
+    esm2_model = feat.get('esm2_model', 'esm2_t33_650M_UR50D')
+    molformer_model = feat.get('molformer_model', 'ibm/MoLFormer-XL-both-10pct')
+
+    if mode == 'esm2_molformer':
+        protein_dim = ESM2_DIMS[esm2_model]
+        ligand_dim = MOLFORMER_DIMS.get(molformer_model, 768)
+    else:
+        protein_dim = ligand_dim = 64
+
+    return {
+        'mode': mode,
+        'esm2_model': esm2_model,
+        'molformer_model': molformer_model,
+        'max_protein_len': feat.get('max_protein_len', 200),
+        'max_ligand_len': feat.get('max_ligand_len', 64),
+        'emb_cache_dir': feat.get('emb_cache_dir'),
+        'precompute': feat.get('precompute', True),
+        'protein_dim': protein_dim,
+        'ligand_dim': ligand_dim,
+    }
+
+
+def precompute_embeddings(datasets: Dict, rank: int, world_size: int, batch_size: int = 8):
+    """Warm the ESM2/MolFormer embedding cache on rank 0, then sync all ranks."""
+    from pearl.data.multitask_datasets import BindingDBDataset
+
+    if rank == 0:
+        for ds in datasets.values():
+            members = getattr(ds, 'datasets', [ds])  # unwrap ConcatDataset
+            for member in members:
+                if isinstance(member, BindingDBDataset) and \
+                        getattr(member, 'featurizer', 'hash') == 'esm2_molformer':
+                    print("Precomputing ESM2/MolFormer embeddings (this may take a while)...")
+                    member.precompute_embeddings(batch_size=batch_size)
+
+    if world_size > 1:
+        dist.barrier()  # ensure cache is populated before other ranks read it
+
+
 def create_datasets(config: Dict, phase: str, rank: int, test_mode: bool = False):
     """Create datasets for training."""
-    phase_config = config['training'][phase]
+    phase_config = config['training'][resolve_phase_key(config, phase)]
     dataset_names = phase_config['datasets']
 
-    # Use synthetic data for testing
-    use_synthetic = test_mode or config.get('use_synthetic', True)
+    # Use synthetic data only in --test mode or if explicitly configured.
+    use_synthetic = test_mode or config.get('use_synthetic', False)
 
     # Data directories
     data_root = Path(config.get('data_root', './data'))
@@ -167,13 +238,53 @@ def create_datasets(config: Dict, phase: str, rank: int, test_mode: bool = False
 
     included_multitask = [name for name in multitask_names if name in dataset_names]
 
+    # When running on real data, only keep datasets that have a real loader.
+    # The others are synthetic-only and would raise NotImplementedError, so we
+    # skip them (with a warning) to guarantee no synthetic data leaks in.
+    if not use_synthetic:
+        skipped = [n for n in included_multitask if n not in REAL_CAPABLE_DATASETS]
+        included_multitask = [n for n in included_multitask if n in REAL_CAPABLE_DATASETS]
+        if skipped and rank == 0:
+            print(f"[real-data mode] Skipping synthetic-only datasets: {skipped}")
+        if not included_multitask:
+            raise ValueError(
+                "No real-data-capable datasets selected for this phase. "
+                f"Add one of {sorted(REAL_CAPABLE_DATASETS)} to the phase 'datasets' list."
+            )
+
+    # Per-dataset extra kwargs (e.g. BindingDB paths / sample caps).
+    bindingdb_cfg = config.get('bindingdb', {})
+    bindingdb_kwargs = {
+        'tsv_path': bindingdb_cfg.get('tsv_path'),
+        'processed_csv': bindingdb_cfg.get('processed_csv'),
+        'max_samples': (1000 if test_mode else bindingdb_cfg.get('max_samples')),
+    }
+
+    # Featurization mode. Real ESM2 + MolFormer embeddings by default on real
+    # data; deterministic 'hash' placeholders in --test / synthetic mode (so the
+    # test path stays fast and does not require loading the encoders).
+    feat_cfg = get_feature_config(config, use_synthetic)
+    if feat_cfg['mode'] == 'esm2_molformer':
+        bindingdb_kwargs.update({
+            'featurizer': 'esm2_molformer',
+            'esm2_model': feat_cfg['esm2_model'],
+            'molformer_model': feat_cfg['molformer_model'],
+            'max_protein_len': feat_cfg['max_protein_len'],
+            'max_ligand_len': feat_cfg['max_ligand_len'],
+            'emb_cache_dir': feat_cfg['emb_cache_dir'],
+        })
+
+    dataset_kwargs = {'bindingdb': bindingdb_kwargs}
+
     if included_multitask:
         if rank == 0:
-            print(f"Loading multi-task datasets: {included_multitask}")
+            print(f"Loading multi-task datasets: {included_multitask} "
+                  f"(use_synthetic={use_synthetic})")
 
         data_dirs = {name: data_root / name for name in included_multitask}
         multitask_dataset = create_multitask_dataset(
-            data_dirs, split='train', use_synthetic=use_synthetic
+            data_dirs, split='train', use_synthetic=use_synthetic,
+            dataset_kwargs=dataset_kwargs,
         )
         datasets['multitask'] = multitask_dataset
         all_datasets.append(multitask_dataset)
@@ -413,17 +524,28 @@ def main():
     # Setup W&B
     run = setup_wandb(config, rank, world_size, args)
 
+    # Resolve featurization (real ESM2 + MolFormer vs. hash placeholders).
+    use_synthetic = args.test or config.get('use_synthetic', False)
+    feat_cfg = get_feature_config(config, use_synthetic)
+    if rank == 0:
+        print(f"Featurizer: {feat_cfg['mode']} "
+              f"(protein_dim={feat_cfg['protein_dim']}, ligand_dim={feat_cfg['ligand_dim']})")
+
     # Create datasets
     train_dataset, dataset_dict = create_datasets(
         config, args.phase, rank, test_mode=args.test
     )
+
+    # Warm the embedding cache before spawning DataLoader workers.
+    if feat_cfg['mode'] == 'esm2_molformer' and feat_cfg['precompute']:
+        precompute_embeddings(dataset_dict, rank, world_size)
 
     # Log dataset statistics
     if rank == 0:
         log_dataset_stats(dataset_dict, run)
 
     # Create dataloader
-    phase_config = config['training'][args.phase]
+    phase_config = config['training'][resolve_phase_key(config, args.phase)]
     batch_size = phase_config.get('batch_size_per_gpu', 4)
 
     if world_size > 1:
@@ -447,10 +569,11 @@ def main():
     # Create model
     model_config = config.get('model', {})
 
-    # Create base PEARL model
+    # Create base PEARL model. Input feature dims match the featurizer
+    # (ESM2 protein dim / MolFormer ligand dim, or 64 for hash placeholders).
     base_pearl = MockPearl(
-        protein_feature_dim=64,
-        ligand_feature_dim=64,
+        protein_feature_dim=feat_cfg['protein_dim'],
+        ligand_feature_dim=feat_cfg['ligand_dim'],
         pair_dim=model_config.get('pair_dim', 128),
         trunk_blocks=model_config.get('num_layers', 12),
         trunk_heads=model_config.get('num_heads', 8),

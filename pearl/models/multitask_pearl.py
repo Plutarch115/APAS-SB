@@ -379,14 +379,22 @@ class MultiTaskPEARL(nn.Module):
             Dictionary with task-specific predictions
         """
         if task == 'binding_affinity':
+            protein_mask = batch.get('protein_mask')
+            ligand_mask = batch.get('ligand_mask')
             # Get pair representation
             pair_repr = self.forward_structure(
                 protein_features=batch['protein_features'],
                 ligand_features=batch['ligand_features'],
-                protein_mask=batch.get('protein_mask'),
-                ligand_mask=batch.get('ligand_mask')
+                protein_mask=protein_mask,
+                ligand_mask=ligand_mask
             )
-            return self.binding_head(pair_repr, batch.get('protein_mask'))
+            # The pair representation spans concatenated [protein; ligand] tokens,
+            # so pooling in the head needs the combined atom-level mask.
+            if protein_mask is not None and ligand_mask is not None:
+                atom_mask = torch.cat([protein_mask, ligand_mask], dim=1)
+            else:
+                atom_mask = protein_mask
+            return self.binding_head(pair_repr, atom_mask)
         
         elif task == 'ddg_ppi':
             # Get pair representations for wild-type and mutant

@@ -128,11 +128,22 @@ class MockPearl(nn.Module):
             # Protein-only (for protein-protein interactions)
             full_emb = protein_emb
 
+        # Build a key-padding mask over the concatenated token sequence so the
+        # trunk's attention ignores padded positions. TransformerEncoderLayer
+        # expects True = position to be ignored, so we invert our True=real masks.
+        key_padding_mask = None
+        if protein_mask is not None:
+            if ligand_features is not None and ligand_mask is not None:
+                token_mask = torch.cat([protein_mask, ligand_mask], dim=1)
+            else:
+                token_mask = protein_mask
+            key_padding_mask = ~token_mask.bool()
+
         # Process through trunk
         # Note: trunk expects [batch, seq_len, features]
         trunk_out = full_emb
         for layer in self.trunk:
-            trunk_out = layer(trunk_out)  # [batch, n_atoms, pair_dim]
+            trunk_out = layer(trunk_out, src_key_padding_mask=key_padding_mask)  # [batch, n_atoms, pair_dim]
 
         # Create pair representation via outer product
         # [batch, n_atoms, 1, pair_dim] + [batch, 1, n_atoms, pair_dim]

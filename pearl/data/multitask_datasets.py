@@ -26,8 +26,27 @@ from torch.utils.data import Dataset, ConcatDataset
 import numpy as np
 import json
 import os
+import hashlib
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
+
+
+def _deterministic_features(seed_str: str, n_rows: int, dim: int) -> np.ndarray:
+    """
+    Generate reproducible feature matrices keyed on a molecule/sequence string.
+
+    The current PEARL trunk (MockPearl) consumes fixed-width numeric feature
+    tensors rather than raw sequences/SMILES. Until a learned tokenizer/encoder
+    is wired in, we derive a *deterministic* feature block from a hash of the
+    identifying string so that identical molecules/targets always map to the
+    same features (unlike random synthetic noise, which differs every epoch and
+    carries no signal). This keeps the pipeline runnable on the real BindingDB
+    labels while remaining stable and reproducible.
+    """
+    digest = hashlib.sha256(seed_str.encode("utf-8")).digest()
+    seed = int.from_bytes(digest[:8], "little", signed=False) % (2 ** 32)
+    rng = np.random.RandomState(seed)
+    return rng.randn(n_rows, dim).astype(np.float32)
 
 
 class PDBBindDataset(Dataset):
@@ -447,22 +466,102 @@ class BindingDBDataset(Dataset):
     - Sampling weight: 0.25 (combined with ChEMBL)
     """
 
+    # Feature dimensions expected by the (Mock)PEARL trunk.
+    N_PROTEIN = 100
+    N_LIGAND = 30
+    FEATURE_DIM = 64
+
     def __init__(
         self,
         data_dir: str,
         split: str = 'train',
         transform=None,
-        use_synthetic: bool = True
+        use_synthetic: bool = True,
+        tsv_path: Optional[str] = None,
+        processed_csv: Optional[str] = None,
+        max_samples: Optional[int] = None,
+        chunksize: int = 200_000,
+        weight: float = 10.0,
+        featurizer: str = 'hash',
+        esm2_model: str = 'esm2_t33_650M_UR50D',
+        molformer_model: str = 'ibm/MoLFormer-XL-both-10pct',
+        max_protein_len: int = 200,
+        max_ligand_len: int = 64,
+        emb_cache_dir: Optional[str] = None,
+        feature_device: Optional[str] = None,
     ):
         self.data_dir = Path(data_dir)
         self.split = split
         self.transform = transform
         self.use_synthetic = use_synthetic
+        self.tsv_path = tsv_path
+        # Default processed cache lives next to the data dir.
+        self.processed_csv = (
+            Path(processed_csv) if processed_csv is not None
+            else self.data_dir / 'bindingdb_processed.csv'
+        )
+        self.max_samples = max_samples
+        self.chunksize = chunksize
+        self.weight = weight
+
+        # Featurization: 'hash' = deterministic placeholder features (fixed dim
+        # 64); 'esm2_molformer' = real ESM2 (protein) + MolFormer (ligand)
+        # per-token embeddings, padded/truncated to fixed lengths.
+        self.featurizer = featurizer
+        self.max_protein_len = max_protein_len
+        self.max_ligand_len = max_ligand_len
+        self.protein_featurizer = None
+        self.ligand_featurizer = None
+
+        if featurizer == 'esm2_molformer':
+            from .featurizers import ESM2Featurizer, MolFormerFeaturizer
+            cache_root = (
+                Path(emb_cache_dir) if emb_cache_dir is not None
+                else self.data_dir / 'emb_cache'
+            )
+            self.protein_featurizer = ESM2Featurizer(
+                model_name=esm2_model, device=feature_device,
+                cache_dir=str(cache_root / f'esm2_{esm2_model}'),
+            )
+            self.ligand_featurizer = MolFormerFeaturizer(
+                model_name=molformer_model, device=feature_device,
+                cache_dir=str(cache_root / 'molformer'),
+            )
+            self.protein_dim = self.protein_featurizer.dim
+            self.ligand_dim = self.ligand_featurizer.dim
+        elif featurizer == 'hash':
+            self.protein_dim = self.FEATURE_DIM
+            self.ligand_dim = self.FEATURE_DIM
+        else:
+            raise ValueError(f"Unknown featurizer '{featurizer}'")
 
         if use_synthetic:
             self.data = self._generate_synthetic_data()
         else:
             self.data = self._load_real_data()
+
+    def precompute_embeddings(self, batch_size: int = 8, verbose: bool = True):
+        """
+        Warm the on-disk embedding cache for all unique sequences / SMILES.
+
+        Runs the ESM2 and MolFormer encoders on GPU up front so that later
+        DataLoader workers (which must not touch CUDA) only read cached files.
+        No-op unless featurizer == 'esm2_molformer'.
+        """
+        if self.featurizer != 'esm2_molformer':
+            return
+        seqs = sorted({item['sequence'] for item in self.data})
+        smis = sorted({item['smiles'] for item in self.data})
+        if verbose:
+            print(f"[precompute] {len(seqs)} unique sequences, "
+                  f"{len(smis)} unique SMILES")
+        self.protein_featurizer.embed_batch(seqs, batch_size=batch_size)
+        self.ligand_featurizer.embed_batch(smis, batch_size=max(batch_size, 32))
+        # Free encoder GPU memory; DataLoader workers only read the disk cache.
+        self.protein_featurizer.release()
+        self.ligand_featurizer.release()
+        if verbose:
+            print("[precompute] embedding cache warmed")
 
     def _generate_synthetic_data(self, num_samples: int = 8000):
         """Generate synthetic BindingDB-like data for testing"""
@@ -487,9 +586,119 @@ class BindingDBDataset(Dataset):
         return data
 
     def _load_real_data(self):
-        """Load real BindingDB data"""
-        # TODO: Implement BindingDB data loading
-        raise NotImplementedError("Real BindingDB data loading not yet implemented")
+        """
+        Load real BindingDB data from the processed CSV cache.
+
+        If the processed CSV does not exist yet, it is built by streaming the
+        raw BindingDB_All.tsv (see scripts/prepare_bindingdb.py for the same
+        logic as a standalone step). Rows are stored as lightweight records;
+        fixed-width numeric features are derived deterministically per sample
+        in __getitem__ from the target sequence and ligand SMILES.
+        """
+        import pandas as pd
+
+        if not self.processed_csv.exists():
+            if self.tsv_path is None:
+                raise FileNotFoundError(
+                    f"Processed BindingDB cache not found at {self.processed_csv} "
+                    f"and no tsv_path provided. Run scripts/prepare_bindingdb.py "
+                    f"or pass tsv_path to build it."
+                )
+            self._build_processed_csv(self.tsv_path)
+
+        df = pd.read_csv(self.processed_csv)
+        if self.max_samples is not None:
+            df = df.head(self.max_samples)
+
+        required = {'smiles', 'target_sequence', 'affinity_value'}
+        missing = required - set(df.columns)
+        if missing:
+            raise ValueError(
+                f"Processed BindingDB CSV {self.processed_csv} missing columns: {missing}"
+            )
+
+        data = []
+        for row in df.itertuples(index=False):
+            data.append({
+                'smiles': row.smiles,
+                'sequence': row.target_sequence,
+                'affinity_value': float(row.affinity_value),
+                'affinity_type': getattr(row, 'affinity_type', 'unknown'),
+                'weight': self.weight,
+                'data_source': 'bindingdb',
+                'task': 'binding_affinity',
+            })
+
+        if len(data) == 0:
+            raise RuntimeError(
+                f"No usable BindingDB rows loaded from {self.processed_csv}."
+            )
+
+        return data
+
+    def _build_processed_csv(self, tsv_path: str):
+        """Stream the raw BindingDB TSV into the compact processed CSV cache."""
+        import pandas as pd
+
+        smiles_col = "Ligand SMILES"
+        name_col = "Target Name"
+        seq_col = "BindingDB Target Chain Sequence 1"
+        affinity_cols = ["Ki (nM)", "Kd (nM)", "IC50 (nM)", "EC50 (nM)"]
+        usecols = [smiles_col, name_col, seq_col] + affinity_cols
+
+        kept_frames = []
+        total_kept = 0
+
+        reader = pd.read_csv(
+            tsv_path, sep="\t", usecols=usecols, chunksize=self.chunksize,
+            low_memory=False, on_bad_lines="skip", dtype=str,
+        )
+
+        for chunk in reader:
+            chunk = chunk[chunk[smiles_col].notna() & chunk[seq_col].notna()].copy()
+            if chunk.empty:
+                continue
+
+            affinity_nm = pd.Series(np.nan, index=chunk.index, dtype=float)
+            affinity_type = pd.Series(np.nan, index=chunk.index, dtype=object)
+            for col in affinity_cols:
+                vals = pd.to_numeric(
+                    chunk[col].astype(str).str.replace(r"[><~=\s]", "", regex=True)
+                    .replace({"": np.nan, "nan": np.nan}),
+                    errors="coerce",
+                )
+                take = affinity_nm.isna() & vals.notna() & (vals > 0)
+                affinity_nm[take] = vals[take]
+                affinity_type[take] = col.split(" ")[0]
+
+            chunk = chunk[affinity_nm.notna()]
+            if chunk.empty:
+                continue
+
+            affinity_nm = affinity_nm[chunk.index]
+            out = pd.DataFrame({
+                'smiles': chunk[smiles_col].values,
+                'target_name': chunk[name_col].values,
+                'target_sequence': chunk[seq_col].values,
+                'affinity_type': affinity_type[chunk.index].values,
+                'affinity_nm': affinity_nm.values,
+                'affinity_value': np.log10(affinity_nm.values / 1000.0),
+            })
+
+            if self.max_samples is not None and total_kept + len(out) > self.max_samples:
+                out = out.iloc[: self.max_samples - total_kept]
+
+            kept_frames.append(out)
+            total_kept += len(out)
+            if self.max_samples is not None and total_kept >= self.max_samples:
+                break
+
+        if not kept_frames:
+            raise RuntimeError(f"No usable rows found in BindingDB TSV {tsv_path}.")
+
+        result = pd.concat(kept_frames, ignore_index=True)
+        self.processed_csv.parent.mkdir(parents=True, exist_ok=True)
+        result.to_csv(self.processed_csv, index=False)
 
     def __len__(self):
         return len(self.data)
@@ -500,15 +709,48 @@ class BindingDBDataset(Dataset):
         if self.transform:
             item = self.transform(item)
 
-        return {
-            'protein_features': torch.from_numpy(item['protein_features']),
-            'ligand_features': torch.from_numpy(item['ligand_features']),
+        result = {
             'target': torch.tensor(item['affinity_value'], dtype=torch.float32),
             'affinity_type': item['affinity_type'],
             'weight': torch.tensor(item['weight'], dtype=torch.float32),
             'task': item['task'],
-            'data_source': item['data_source']
+            'data_source': item['data_source'],
         }
+
+        if self.featurizer == 'esm2_molformer':
+            from .featurizers import pad_or_truncate
+            # Real per-token embeddings (read from cache; computed on miss).
+            prot_emb = self.protein_featurizer.get_cached(item['sequence'])
+            if prot_emb is None:
+                prot_emb = self.protein_featurizer.embed(item['sequence'])
+            lig_emb = self.ligand_featurizer.get_cached(item['smiles'])
+            if lig_emb is None:
+                lig_emb = self.ligand_featurizer.embed(item['smiles'])
+
+            pf, pm = pad_or_truncate(prot_emb, self.max_protein_len, self.protein_dim)
+            lf, lm = pad_or_truncate(lig_emb, self.max_ligand_len, self.ligand_dim)
+            result['protein_features'] = torch.from_numpy(pf)
+            result['ligand_features'] = torch.from_numpy(lf)
+            result['protein_mask'] = torch.from_numpy(pm)
+            result['ligand_mask'] = torch.from_numpy(lm)
+            return result
+
+        # 'hash' mode. Synthetic records carry precomputed feature arrays; real
+        # records derive deterministic placeholder features from their identity.
+        if 'protein_features' in item:
+            protein_features = item['protein_features']
+            ligand_features = item['ligand_features']
+        else:
+            protein_features = _deterministic_features(
+                item['sequence'], self.N_PROTEIN, self.FEATURE_DIM
+            )
+            ligand_features = _deterministic_features(
+                item['smiles'], self.N_LIGAND, self.FEATURE_DIM
+            )
+
+        result['protein_features'] = torch.from_numpy(protein_features)
+        result['ligand_features'] = torch.from_numpy(ligand_features)
+        return result
 
 
 class PubChemHTSDataset(Dataset):
@@ -951,7 +1193,8 @@ class SyntheticDecoysDataset(Dataset):
 def create_multitask_dataset(
     data_dirs: Dict[str, str],
     split: str = 'train',
-    use_synthetic: bool = True
+    use_synthetic: bool = True,
+    dataset_kwargs: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> ConcatDataset:
     """
     Create a combined HYBRID multi-task dataset.
@@ -966,11 +1209,16 @@ def create_multitask_dataset(
                               'pubchem_small', 'cemm', 'midas', 'synthetic_decoys'
         split: 'train', 'val', or 'test'
         use_synthetic: Whether to use synthetic data for testing
+        dataset_kwargs: Optional per-dataset extra keyword arguments, keyed by
+                        dataset name (e.g. {'bindingdb': {'tsv_path': ...,
+                        'processed_csv': ..., 'max_samples': ...}}). Only
+                        datasets whose loaders accept these kwargs use them.
 
     Returns:
         ConcatDataset combining all requested datasets
     """
     datasets = []
+    dataset_kwargs = dataset_kwargs or {}
 
     # ========== ORIGINAL MULTI-TASK DATASETS ==========
     if 'pdbind' in data_dirs:
@@ -990,7 +1238,10 @@ def create_multitask_dataset(
         datasets.append(ChEMBLDataset(data_dirs['chembl'], split, use_synthetic=use_synthetic))
 
     if 'bindingdb' in data_dirs:
-        datasets.append(BindingDBDataset(data_dirs['bindingdb'], split, use_synthetic=use_synthetic))
+        datasets.append(BindingDBDataset(
+            data_dirs['bindingdb'], split, use_synthetic=use_synthetic,
+            **dataset_kwargs.get('bindingdb', {})
+        ))
 
     if 'pubchem_hts' in data_dirs:
         datasets.append(PubChemHTSDataset(data_dirs['pubchem_hts'], split, use_synthetic=use_synthetic))
