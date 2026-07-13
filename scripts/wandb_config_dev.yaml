@@ -1,0 +1,53 @@
+wandb:
+  project: "apas-sb-dev"
+  entity: null
+  tags: ["pearl", "binding-affinity", "dev-run"]
+
+data_root: "./data"
+use_synthetic: false
+
+bindingdb:
+  tsv_path: "/nfs/lambda_stor_01/data/avasan/APAS-SB/APAS-SB/data/bindingdb/BindingDB_All.tsv"
+  processed_csv: "./data/bindingdb/bindingdb_processed.csv"
+  max_samples: 3000   # small enough to build+embed fast, big enough for a real loss trend
+
+features:
+  mode: esm2_molformer
+  esm2_model: esm2_t30_150M_UR50D   # middle ground: real quality, faster than the 650M production model
+  molformer_model: ibm/MoLFormer-XL-both-10pct
+  max_protein_len: 200
+  max_ligand_len: 64
+  emb_cache_dir: "./data/bindingdb/emb_cache"
+  precompute: true
+
+model:
+  hidden_dim: 512
+  num_layers: 12
+  num_heads: 8
+  dropout: 0.1
+  pair_dim: 128
+
+training:
+  phase_2a:
+    name: "dev_run"
+    batch_size_per_gpu: 8
+    num_epochs: 15
+    learning_rate: 1.0e-4
+    weight_decay: 0.01
+    datasets:
+      - bindingdb   # only real-capable dataset right now; omit the others to avoid skip-warnings
+
+max_grad_norm: 1.0
+scheduler: "cosine"
+min_learning_rate: 1.0e-6
+
+log_interval: 5
+checkpoint_interval: 5
+checkpoint_dir: "./checkpoints_dev"
+
+num_workers: 4
+pin_memory: true
+mixed_precision: true
+
+val_interval: 5
+val_batch_size: 8
