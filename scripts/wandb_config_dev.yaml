@@ -28,18 +28,18 @@ model:
   pair_dim: 128
 
 training:
-  phase_2a:
+  phase_2a:    # DEAD
     name: "dev_run"
-    batch_size_per_gpu: 8
-    num_epochs: 15
+    batch_size_per_gpu: 128
+    num_epochs: 60
     learning_rate: 1.0e-4
     weight_decay: 0.01
     datasets:
       - bindingdb   # only real-capable dataset right now; omit the others to avoid skip-warnings
 
 max_grad_norm: 1.0
-scheduler: "cosine"
-min_learning_rate: 1.0e-6
+scheduler: "cosine" # DEAD
+min_learning_rate: 1.0e-6 # DEAD
 
 log_interval: 5
 checkpoint_interval: 5
