@@ -632,7 +632,7 @@ def main():
             wandb.log({
                 'epoch/train_loss': train_loss,
                 'epoch/number': epoch,
-            }, step=epoch)
+             }, step=(epoch + 1) * len(dataloader))
 
             # Save checkpoint
             if (epoch + 1) % config.get('checkpoint_interval', 10) == 0:
