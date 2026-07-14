@@ -9,7 +9,7 @@ use_synthetic: false
 bindingdb:
   tsv_path: "/nfs/lambda_stor_01/data/avasan/APAS-SB/APAS-SB/data/bindingdb/BindingDB_All.tsv"
   processed_csv: "./data/bindingdb/bindingdb_processed.csv"
-  max_samples: 3000   # small enough to build+embed fast, big enough for a real loss trend
+  max_samples: 50000   # small enough to build+embed fast, big enough for a real loss trend
 
 features:
   mode: esm2_molformer
@@ -28,9 +28,9 @@ model:
   pair_dim: 128
 
 training:
-  phase_2a:    # DEAD
+  phase_2a:   
     name: "dev_run"
-    batch_size_per_gpu: 128
+    batch_size_per_gpu: 256
     num_epochs: 60
     learning_rate: 1.0e-4
     weight_decay: 0.01
