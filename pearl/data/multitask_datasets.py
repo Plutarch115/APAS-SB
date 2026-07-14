@@ -31,6 +31,26 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
 
+# Residue tokens the ESM alphabet accepts, including the ambiguity codes.
+_ESM_RESIDUES = set("ACDEFGHIKLMNPQRSTVWYXBUZO.-")
+
+
+def _canonical_sequence(sequence: Any) -> Optional[str]:
+    """
+    Normalise a raw target sequence, or return None if it is unusable.
+
+    Returns an uppercase, whitespace-free sequence. None means the row should be
+    dropped rather than handed to ESM, which would otherwise fail deep in its
+    tokenizer with a KeyError naming the entire sequence.
+    """
+    if sequence is None or (isinstance(sequence, float) and np.isnan(sequence)):
+        return None
+    seq = "".join(str(sequence).split()).upper()
+    if not seq or set(seq) - _ESM_RESIDUES:
+        return None
+    return seq
+
+
 def _deterministic_features(seed_str: str, n_rows: int, dim: int) -> np.ndarray:
     """
     Generate reproducible feature matrices keyed on a molecule/sequence string.
@@ -618,16 +638,27 @@ class BindingDBDataset(Dataset):
             )
 
         data = []
+        skipped = 0
         for row in df.itertuples(index=False):
+            # BindingDB casing is inconsistent across submitters and the ESM
+            # alphabet is uppercase-only. Canonicalise here so that cache keys
+            # and sequence-based splits agree on protein identity.
+            sequence = _canonical_sequence(row.target_sequence)
+            if sequence is None:
+                skipped += 1
+                continue
             data.append({
                 'smiles': row.smiles,
-                'sequence': row.target_sequence,
+                'sequence': sequence,
                 'affinity_value': float(row.affinity_value),
                 'affinity_type': getattr(row, 'affinity_type', 'unknown'),
                 'weight': self.weight,
                 'data_source': 'bindingdb',
                 'task': 'binding_affinity',
             })
+
+        if skipped:
+            print(f"[bindingdb] skipped {skipped} rows with unusable target sequences")
 
         if len(data) == 0:
             raise RuntimeError(
