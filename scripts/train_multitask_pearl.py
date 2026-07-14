@@ -83,7 +83,7 @@ class MultiTaskLoss(nn.Module):
             confidence = predictions['confidence']
         elif task == 'ddg_ppi':
             pred_values = predictions['ddg']
-            confidence = predictions['confidence']
+            confidence = predictions['ddg_confidence']
         elif task == 'kcat':
             pred_values = predictions['log_kcat']
             confidence = predictions['confidence']
