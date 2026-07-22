@@ -1,0 +1,11 @@
+# requirements.txt -- pip/venv path for CUDA 11.8 / V100.
+# Install with:
+#   python -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.0.1+cu118
+torch_geometric>=2.4
+numpy
+h5py
+huggingface_hub>=0.23
+fsspec
+tqdm
