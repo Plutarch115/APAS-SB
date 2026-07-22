@@ -1,0 +1,25 @@
+# ============================================================================
+# Midnight-Dev SSH ControlMaster config for Lambda
+# ----------------------------------------------------------------------------
+# APPEND the block below to ~/.ssh/config on the Raspberry Pi.
+#
+# WHY: Lambda login is password + Duo. An autonomous agent cannot type a
+# password or tap a Duo push. ControlMaster solves this: YOU open ONE master
+# connection at bedtime (type password, tap Duo once). That connection stays
+# alive as a background socket, and every later `ssh lambda ...` reuses it
+# with NO re-authentication for as long as the socket lives (ControlPersist).
+#
+# The agent never sees your password. It only rides the socket you opened.
+# ============================================================================
+
+Host lambda
+    HostName lambda0.cels.anl.gov
+    User jstamborski
+    # --- connection multiplexing (the whole point) ---
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+    ControlPersist 8h
+    # --- keepalives so an idle socket doesn't die mid-night ---
+    ServerAliveInterval 30
+    ServerAliveCountMax 6
+    TCPKeepAlive yes
